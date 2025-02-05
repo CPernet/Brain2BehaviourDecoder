@@ -1,2 +1,3 @@
 # Brain2BehaviourDecoder
-prediction of behaviour from brain images
+
+In this work, we try to predict behaviour from a set of brain images.
