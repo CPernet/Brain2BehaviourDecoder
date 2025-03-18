@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import gamma
 from scipy.stats import t
+from scipy.ndimage import gaussian_filter
 
 def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space_scale=0.1, distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't']):
     """
@@ -35,23 +36,22 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
         else:
             raise ValueError("Unknown distribution type")
 
+    # add a convolution to create a smooth approach
     vector = np.zeros((a, b, c, k+1))
     #distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't']
     interval = (a * b * c * (k+1)) // len(distributions)
     
+    for i, dist in enumerate(distributions):
+        start_idx = i * interval
+        end_idx = (i + 1) * interval if i < len(distributions) - 1 else a * b * c * (k+1)
+        values = generate_values(dist, end_idx - start_idx)
+        vector.flat[start_idx:end_idx] = values
+        
     if use_space_correlation:
-        for i, dist in enumerate(distributions):
-                start_idx = i * interval
-                end_idx = (i + 1) * interval if i < len(distributions) - 1 else a * b * c * (k+1)
-                values = generate_values(dist, end_idx - start_idx)
-                common_val = generate_values(dist, 1)
-                vector.flat[start_idx:end_idx] = common_val + values * space_scale
-
-    else:
-        for i, dist in enumerate(distributions):
-            start_idx = i * interval
-            end_idx = (i + 1) * interval if i < len(distributions) - 1 else a * b * c * (k+1)
-            values = generate_values(dist, end_idx - start_idx)
-            vector.flat[start_idx:end_idx] = values
+        # Apply 3D convolution with Gaussian kernel
+        # This will result of a smooth transition between the different distributions
+        # This should be further discussed
+        for i in range(vector.shape[-1]):
+            vector[..., i] = gaussian_filter(vector[..., i], sigma=space_scale)
 
     return vector

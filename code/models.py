@@ -1,5 +1,7 @@
 import numpy as np
 
+# np.linalg.solve works for nonsingular matrices, consider pinv for singular matrices
+
 def batched_ols(X, Y):
     """
     Fully vectorized Ordinary Least Squares (OLS) solution for batched inputs.
@@ -17,9 +19,10 @@ def batched_ols(X, Y):
 
     XtX = np.einsum('bji,bjk->bik', X, X)  # Compute X^T X
     XtY = np.einsum('bji,bjk->bik', X, Y)  # Compute X^T Y
-    return np.linalg.solve(XtX, XtY)  # Solve (X^T X) theta = X^T Y
+    return np.einsum('bij,bjk->bik', np.linalg.pinv(XtX), XtY)  # Use pinv instead of solve
 
-def batched_ridge(X, Y, alpha=1.0):
+def batched_ridge(X, Y, alphas=[1.0]):
+    # TODO accept list of alphas
     """
     Fully vectorized Ridge Regression solution for batched inputs.
     
@@ -35,15 +38,22 @@ def batched_ridge(X, Y, alpha=1.0):
         Y = Y[:, :, None]
 
     _, _, n_features = X.shape
-    lambda_I = np.zeros((n_features, n_features))  # Regularization matrix
-    lambda_I[1:, 1:] = alpha * np.eye(n_features-1)  # Do not regularize the bias term
+
     #I = np.eye(n_features)[None, :, :]  # Identity matrix expanded for batch
     XtX = np.einsum('bji,bjk->bik', X, X)  # Compute X^T X
     XtY = np.einsum('bji,bjk->bik', X, Y)  # Compute X^T Y
-    if Y.ndim == 3:
-        return np.linalg.solve(XtX + alpha * lambda_I, XtY)  # Solve (X^T X + alpha*I) theta = X^T Y
-    else:
-        return np.linalg.solve(XtX + alpha * lambda_I, XtY).squeeze()
+    ret = []
+    for alpha in alphas:
+        lambda_I = np.zeros((n_features, n_features))  # Regularization matrix
+        lambda_I[1:, 1:] = alpha * np.eye(n_features-1)  # Do not regularize the bias term
+        if Y.ndim == 3:
+            a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)  # Use pinv instead of solve
+            ret.append(a)
+        else:
+            a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)
+            a.squeeze()
+            ret.append(a)
+    return ret
 
 # TODO fix this
 def batched_irls(X, Y, max_iter=10, tol=1e-6):
@@ -64,20 +74,34 @@ def batched_irls(X, Y, max_iter=10, tol=1e-6):
 
     batch_size, n_samples, n_features = X.shape
     _, _, n_targets = Y.shape
-    weights = np.ones((batch_size, n_samples, n_targets))  # Initialize weights
-    theta = np.zeros((batch_size, n_features, n_targets))  # Initialize parameters
+
+    # Solve for OLS
+    theta = np.linalg.pinv(X) @ Y
+    
+    # Hat matrix and leverage
+    H = np.einsum('bij,bjk,bkl->bil', X, np.linalg.pinv(np.einsum('bji,bjk->bik', X, X)), X.transpose(0, 2, 1))
+    adjfactor = 1 / np.sqrt(1 - np.diagonal(H, axis1=1, axis2=2))
+    adjfactor[np.isinf(adjfactor)] = 1  # When H=1 do nothing
+
+    weights = adjfactor[:, :, None]  # Initialize weights
     
     for _ in range(max_iter):
-        W = np.sqrt(weights)
-        X_weighted = X * W
-        Y_weighted = Y * W
+        w = np.sqrt(weights)
+        X_weighted = X * w
+        Y_weighted = Y * w
 
         XtX = np.einsum('bji,bjk->bik', X_weighted, X_weighted)
         XtY = np.einsum('bji,bjk->bik', X_weighted, Y_weighted)
-        theta_new = np.linalg.solve(XtX, XtY)
+        theta_new = np.linalg.pinv(XtX) @ XtY
 
-        residuals = np.abs(Y - np.einsum('bij,bjk->bik', X, theta_new))
-        new_weights = 1 / (residuals + tol)
+        residuals = Y - np.einsum('bij,bjk->bik', X, theta_new)
+        residuals_adj = residuals * adjfactor[:, :, None]
+        re = np.median(np.abs(residuals_adj), axis=1) / 0.6745
+        re[re < 1e-5] = 1e-5
+        r = residuals_adj / (4.685 * re[:, None, :])
+        
+        new_weights = (np.abs(r) < 1) * (1 - r**2)**2
+        new_weights = np.sqrt(new_weights)
 
         if np.allclose(weights, new_weights, atol=tol):
             break
@@ -97,7 +121,7 @@ def batched_linear_regression(X,Y,lambda_reg):
     XTX_reg = XTX + lambda_I[None, :, :]  # Broadcast regularization to all models
 
     # Invert (X^T X + lambda I) for each model
-    XTX_inv = np.linalg.inv(XTX_reg)  # Shape: (m, k+1, k+1)
+    XTX_inv = np.linalg.pinv(XTX_reg)  # Shape: (m, k+1, k+1)
 
     # Compute coefficients for each model
     return np.einsum('mij,mnj,mn->mi', XTX_inv, X, Y)  # Shape: (m, k+1)
