@@ -38,11 +38,21 @@ class NiftiLazyLoader:
             mask = np.all(mask,axis=-1)
             mask_num_el = np.sum(mask)
             # TODO implement this for data without mask
-            self.mask_shape = mask.shape            
+            self.mask_shape = mask.shape
+            # Generate x, y, z coordinates for the given mask shape
+            x, y, z = np.meshgrid(
+                np.arange(mask.shape[0]),
+                np.arange(mask.shape[1]),
+                np.arange(mask.shape[2]),
+                indexing='ij'
+            )
+            # Stack the coordinates along a new dimension
+            self.coordinates = np.stack([x[mask], y[mask], z[mask]], axis=-1)
             print(f"Mask shape: {mask.shape}, Number of elements in mask: {mask_num_el}, out of {mask.size} elements")
             split_points = np.linspace(0, mask_num_el, self.k + 1, dtype=int)
             self.split_indices = [(split_points[i], split_points[i+1]) for i in range(self.k)] 
-            
+        
+        self.data_shape = self.mask_shape if use_mask is not None else None
 
         self.mask = mask if use_mask is not None else None
         self.mask_num_el = mask_num_el if use_mask is not None else None
@@ -51,7 +61,46 @@ class NiftiLazyLoader:
         self.batch_size = 1  # Initialize batch_size
         self.k = 16  # Initialize k
         #available_mem = psutil.virtual_memory()[4]
+        self.check_shapes_of_loaded_images()
 
+    def check_shapes_of_loaded_images(self):
+        reference_length = None
+
+        for data_filename_pattern in self.data_filename_paterns:
+            images = image.load_img(f"../../data/sub-*/{data_filename_pattern}" + self.extension, dtype=self.dtype)
+            
+            if images is None:
+                raise ValueError(f"No images found for pattern: {data_filename_pattern}")
+            
+            # Convert to list of 3D images if it's a 4D image
+            if len(images.shape) == 4:
+                if reference_length is None:
+                    reference_length = images.shape[-1]
+                else:
+                    assert images.shape[-1] == reference_length, f"Number of images mismatch: Expected {reference_length}, but got {images.shape[-1]}"
+                image_0 = images.slicer[..., 0]
+                if self.data_shape is None:
+                    self.data_shape = image_0.shape
+                else:
+                    assert image_0.shape == self.data_shape, f"Shape mismatch: {image_0.shape} != {self.data_shape}"
+            else:
+                if reference_length is None:
+                    reference_length = 1
+                else:
+                    assert 1 == reference_length, f"Number of images mismatch: Expected {reference_length}, but got 1"
+                if self.data_shape is None:
+                    self.data_shape = images.shape
+                else:
+                    assert images.shape == self.data_shape, f"Shape mismatch: {images.shape} != {self.data_shape}"
+            x, y, z = np.meshgrid(
+                np.arange(self.data_shape[0]),
+                np.arange(self.data_shape[1]),
+                np.arange(self.data_shape[2]),
+                indexing='ij'
+            )
+            # Stack the coordinates along a new dimension
+            self.coordinates = np.stack([x, y, z], axis=-1)
+    
     def __next__(self):
         if self.current_index >= self.k:
             raise StopIteration

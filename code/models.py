@@ -2,17 +2,21 @@ import numpy as np
 
 # np.linalg.solve works for nonsingular matrices, consider pinv for singular matrices
 
-def batched_ols(X, Y):
+def batched_ols(X, Y, dtype=np.float64):
     """
     Fully vectorized Ordinary Least Squares (OLS) solution for batched inputs.
     
     Parameters:
     - X: (batch_size, n_samples, n_features)
     - Y: (batch_size, n_samples, n_targets)
+    - dtype: Data type for computations (default: np.float64)
     
     Returns:
     - theta: (batch_size, n_features, n_targets)
     """
+
+    X = X.astype(dtype)
+    Y = Y.astype(dtype)
 
     if Y.ndim == 2:
         Y = Y[:, :, None]
@@ -21,31 +25,33 @@ def batched_ols(X, Y):
     XtY = np.einsum('bji,bjk->bik', X, Y)  # Compute X^T Y
     return np.einsum('bij,bjk->bik', np.linalg.pinv(XtX), XtY)  # Use pinv instead of solve
 
-def batched_ridge(X, Y, alphas=[1.0]):
-    # TODO accept list of alphas
+def batched_ridge(X, Y, alphas=[1.0], dtype=np.float64):
     """
     Fully vectorized Ridge Regression solution for batched inputs.
     
     Parameters:
     - X: (batch_size, n_samples, n_features)
     - Y: (batch_size, n_samples, n_targets)
-    - alpha: Regularization strength
+    - alphas: List of regularization strengths
+    - dtype: Data type for computations (default: np.float64)
     
     Returns:
-    - theta: (batch_size, n_features, n_targets)
+    - List of theta arrays, one for each alpha: [(batch_size, n_features, n_targets), ...]
     """
+    X = X.astype(dtype)
+    Y = Y.astype(dtype)
+
     if Y.ndim == 2:
         Y = Y[:, :, None]
 
     _, _, n_features = X.shape
 
-    #I = np.eye(n_features)[None, :, :]  # Identity matrix expanded for batch
     XtX = np.einsum('bji,bjk->bik', X, X)  # Compute X^T X
     XtY = np.einsum('bji,bjk->bik', X, Y)  # Compute X^T Y
     ret = []
     for alpha in alphas:
-        lambda_I = np.zeros((n_features, n_features))  # Regularization matrix
-        lambda_I[1:, 1:] = alpha * np.eye(n_features-1)  # Do not regularize the bias term
+        lambda_I = np.zeros((n_features, n_features), dtype=dtype)  # Regularization matrix
+        lambda_I[1:, 1:] = alpha * np.eye(n_features - 1, dtype=dtype)  # Do not regularize the bias term
         if Y.ndim == 3:
             a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)  # Use pinv instead of solve
             ret.append(a)
@@ -56,7 +62,7 @@ def batched_ridge(X, Y, alphas=[1.0]):
     return ret
 
 # TODO fix this
-def batched_irls(X, Y, max_iter=10, tol=1e-6):
+def batched_irls(X, Y, max_iter=10, tol=1e-6, dtype=np.float64):
     """
     Fully vectorized Iteratively Reweighted Least Squares (IRLS) for batched inputs.
     
@@ -65,10 +71,14 @@ def batched_irls(X, Y, max_iter=10, tol=1e-6):
     - Y: (batch_size, n_samples, n_targets)
     - max_iter: Number of iterations
     - tol: Convergence threshold
+    - dtype: Data type for computations (default: np.float64)
     
     Returns:
     - theta: (batch_size, n_features, n_targets)
     """
+    X = X.astype(dtype)
+    Y = Y.astype(dtype)
+
     if Y.ndim == 2:
         Y = Y[:, :, None]
 
@@ -109,6 +119,49 @@ def batched_irls(X, Y, max_iter=10, tol=1e-6):
 
     return theta_new
 
+def batched_lasso(X, Y, alphas=[1.0], max_iter=100, tol=1e-6, dtype=np.float64):
+    """
+    Fully vectorized Lasso Regression solution for batched inputs using coordinate descent.
+    
+    Parameters:
+    - X: (batch_size, n_samples, n_features)
+    - Y: (batch_size, n_samples, n_targets)
+    - alphas: List of regularization strengths
+    - max_iter: Maximum number of iterations for Lasso solver
+    - tol: Convergence tolerance for Lasso solver
+    - dtype: Data type for computations (default: np.float64)
+    
+    Returns:
+    - List of theta arrays, one for each alpha: [(batch_size, n_features, n_targets), ...]
+    """
+    X = X.astype(dtype)
+    Y = Y.astype(dtype)
+
+    if Y.ndim == 2:
+        Y = Y[:, :, None]
+
+    batch_size, n_samples, n_features = X.shape
+    _, _, n_targets = Y.shape
+
+    results = []
+    for alpha in alphas:
+        theta = np.zeros((batch_size, n_features, n_targets), dtype=dtype)  # Initialize coefficients
+        for _ in range(max_iter):
+            theta_old = theta.copy()
+            for j in range(n_features):
+                # Compute the residual without the contribution of feature j
+                residual = Y - np.einsum('bij,bjk->bik', X, theta) + X[:, :, j:j+1] * theta[:, j:j+1, :]
+                
+                # Update theta for feature j using soft-thresholding
+                rho = np.einsum('bni,bnj->bij', X[:, :, j:j+1], residual).squeeze(axis=1)
+                theta[:, j:j+1, :] = np.sign(rho) * np.maximum(np.abs(rho) - alpha, 0) / np.einsum('bni,bni->bi', X[:, :, j:j+1], X[:, :, j:j+1])[:, :, None]
+            
+            # Check for convergence
+            if np.all(np.abs(theta - theta_old) < tol):
+                break
+        results.append(theta)
+    return results
+        
 def batched_linear_regression(X,Y,lambda_reg):
     k=X.shape[-1] - 1
     # Compute X^T X and X^T Y for all models in a batch

@@ -3,7 +3,7 @@ from scipy.stats import gamma
 from scipy.stats import t
 from scipy.ndimage import gaussian_filter
 
-def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space_scale=0.1, distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't']):
+def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space_scale=0.1, distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't'], offset=20, post_process_s_and_p=False, post_process_type='negate', post_process_p=0.05):
     """
     Creates a random vector with specified dimensions and distributions.
     Parameters:
@@ -46,6 +46,10 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
         end_idx = (i + 1) * interval if i < len(distributions) - 1 else a * b * c * (k+1)
         values = generate_values(dist, end_idx - start_idx)
         vector.flat[start_idx:end_idx] = values
+
+    if offset is not None:
+        uniform_values = np.random.uniform(0, offset, size=(k+1))
+        vector += uniform_values.reshape((1, 1, 1, k+1))
         
     if use_space_correlation:
         # Apply 3D convolution with Gaussian kernel
@@ -53,5 +57,17 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
         # This should be further discussed
         for i in range(vector.shape[-1]):
             vector[..., i] = gaussian_filter(vector[..., i], sigma=space_scale)
+    
+    if post_process_s_and_p:
+        # Apply salt and pepper noise
+        mask = np.random.rand(a, b, c, k+1) < post_process_p
+        if post_process_type == 'negate':
+            vector[mask] = -vector[mask]
+        elif post_process_type == 'zero':
+            vector[mask] = 0
+        elif post_process_type == 'inverse':
+            vector[mask] = 1 / vector
+        else:
+            raise ValueError("Unknown post-processing type")
 
     return vector
