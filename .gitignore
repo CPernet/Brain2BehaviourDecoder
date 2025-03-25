@@ -175,7 +175,7 @@ cython_debug/
 .pypirc
 
 # Data part
-data/
+BIDS_derivatives/
 
 # results
 outputs/

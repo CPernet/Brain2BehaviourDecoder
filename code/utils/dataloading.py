@@ -9,13 +9,13 @@ import shutil
 import pandas as pd
 
 class NiftiLazyLoader:
-    def __init__(self, data_filename_paterns, column_names_as_data, column_name_target, use_mask, dtype = np.float32, decompress = True):
+    def __init__(self, data_filename_paterns, column_names_as_data, column_name_target, use_mask, dtype = np.float32, decompress = True, k=16):
 
         if decompress:
             self.extension = ".nii"
-            process_subfolders_decompression("../../data","sub-*",data_filename_paterns)
+            process_subfolders_decompression("../BIDS_derivatives","sub-*",data_filename_paterns)
             if use_mask is not None:
-                process_subfolders_decompression("../../data","sub-*",[use_mask])
+                process_subfolders_decompression("../BIDS_derivatives","sub-*",[use_mask])
         else:
             self.extension = ".nii.gz"
         # List the columns you want to read (by name)
@@ -24,12 +24,12 @@ class NiftiLazyLoader:
         #self.participants_data = pd.read_csv('participants.tsv', sep='\t', usecols=columns_to_read)
         self.data_filename_paterns = data_filename_paterns
         self.dtype = dtype
-        self.k = 16  # Initialize k
+        self.k = k  # Initialize k
         self.split_indices = None
         self.parameters = len(data_filename_paterns)
 
         if use_mask is not None:
-            mask = image.load_img("../data/sub-*/"+use_mask+self.extension)
+            mask = image.load_img("../BIDS_derivatives/sub-*/"+use_mask+self.extension)
             mask = mask.get_fdata()
             print(f"Mask shape: {mask.shape}")
             #mask = image.load_img(use_mask)
@@ -67,7 +67,7 @@ class NiftiLazyLoader:
         reference_length = None
 
         for data_filename_pattern in self.data_filename_paterns:
-            images = image.load_img(f"../../data/sub-*/{data_filename_pattern}" + self.extension, dtype=self.dtype)
+            images = image.load_img(f"../BIDS_derivatives/sub-*/{data_filename_pattern}" + self.extension, dtype=self.dtype)
             
             if images is None:
                 raise ValueError(f"No images found for pattern: {data_filename_pattern}")
@@ -104,27 +104,46 @@ class NiftiLazyLoader:
     def __next__(self):
         if self.current_index >= self.k:
             raise StopIteration
+        
+        self.images_paths = []
 
         data_filename_paterns = self.data_filename_paterns
         mask = self.mask
         all_data = []
+        if len(self.images_paths) == 0:
+            for data_filename_patern in data_filename_paterns:
+                images = image.load_img(f"../BIDS_derivatives/sub-*/{data_filename_patern}"+self.extension, dtype=self.dtype)
+                self.images_paths.append(images)
+                data = images.get_fdata()
 
-        for data_filename_patern in data_filename_paterns:
-            images = image.load_img(f"../../data/sub-*/{data_filename_patern}"+self.extension, dtype=self.dtype)
-            data = images.get_fdata()
-
-            if mask is not None:
-                data = data[mask]
-            else:
-                data = np.reshape(data, (-1,data.shape[-1]))
-                if self.split_indices is None:
-                    split_points = np.linspace(0, data.shape[0], self.k + 1, dtype=int)
-                    self.split_indices = [(split_points[i], split_points[i+1]) for i in range(self.k)] 
+                if mask is not None:
+                    data = data[mask]
+                else:
+                    data = np.reshape(data, (-1,data.shape[-1]))
+                    if self.split_indices is None:
+                        split_points = np.linspace(0, data.shape[0], self.k + 1, dtype=int)
+                        self.split_indices = [(split_points[i], split_points[i+1]) for i in range(self.k)] 
 
 
-            part_size = (data.shape[0] // self.k) + 1
-            start, end = self.split_indices[self.current_index]
-            all_data.append(data[start:end,:])
+                part_size = (data.shape[0] // self.k) + 1
+                start, end = self.split_indices[self.current_index]
+                all_data.append(data[start:end,:])
+        else:
+            for images in self.images_paths:
+                data = images.get_fdata()
+
+                if mask is not None:
+                    data = data[mask]
+                else:
+                    data = np.reshape(data, (-1,data.shape[-1]))
+                    if self.split_indices is None:
+                        split_points = np.linspace(0, data.shape[0], self.k + 1, dtype=int)
+                        self.split_indices = [(split_points[i], split_points[i+1]) for i in range(self.k)] 
+
+
+                part_size = (data.shape[0] // self.k) + 1
+                start, end = self.split_indices[self.current_index]
+                all_data.append(data[start:end,:])
         all_data = np.stack(all_data, axis=-1)
         self.current_index += 1
         return all_data, self.split_indices[self.current_index-1]

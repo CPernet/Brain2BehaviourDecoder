@@ -3,8 +3,8 @@ import shutil
 import pandas as pd
 
 # Define paths
-participants_file = "participants.tsv"
-problematic_folder = "problematic"
+participants_file = "../BIDS_derivatives/participants.tsv"
+problematic_folder = "../BIDS_derivatives/problematic"
 
 # Create 'problematic' folder if it doesn't exist
 os.makedirs(problematic_folder, exist_ok=True)

@@ -3,7 +3,7 @@ from scipy.stats import gamma
 from scipy.stats import t
 from scipy.ndimage import gaussian_filter
 
-def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space_scale=0.1, distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't'], offset=20, post_process_s_and_p=False, post_process_type='negate', post_process_p=0.05):
+def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space_scale=0.1, distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't'], offset=20, post_process_s_and_p=False, post_process_type='negate', post_process_p=0.05, dtype=np.float64):
     """
     Creates a random vector with specified dimensions and distributions.
     Parameters:
@@ -24,20 +24,20 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
 
     def generate_values(distribution, size):
         if distribution == 'gaussian':
-            return np.random.normal(size=size, scale=sigma)
+            return np.random.normal(size=size, scale=sigma).astype(dtype)
         elif distribution == 'gamma':
-            return gamma.rvs(a=2.0, size=size)
+            return gamma.rvs(a=2.0, size=size).astype(dtype)
         elif distribution == 'truncated_gaussian':
-            return np.sqrt(np.random.normal(size=size, scale=sigma)**2)
+            return np.sqrt(np.random.normal(size=size, scale=sigma)**2).astype(dtype)
         elif distribution == 'uniform':
-            return np.random.uniform(size=size)
+            return np.random.uniform(size=size).astype(dtype)
         elif distribution == 't':
-            return t.rvs(df=10, size=size)
+            return t.rvs(df=10, size=size).astype(dtype)
         else:
             raise ValueError("Unknown distribution type")
 
     # add a convolution to create a smooth approach
-    vector = np.zeros((a, b, c, k+1))
+    vector = np.zeros((a, b, c, k+1), dtype=dtype)
     #distributions = ['gaussian', 'gamma', 'truncated_gaussian', 'uniform', 't']
     interval = (a * b * c * (k+1)) // len(distributions)
     
@@ -48,7 +48,7 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
         vector.flat[start_idx:end_idx] = values
 
     if offset is not None:
-        uniform_values = np.random.uniform(0, offset, size=(k+1))
+        uniform_values = np.random.uniform(0, offset, size=(k+1)).astype(dtype)
         vector += uniform_values.reshape((1, 1, 1, k+1))
         
     if use_space_correlation:
