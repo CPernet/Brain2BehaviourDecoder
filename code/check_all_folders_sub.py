@@ -17,15 +17,18 @@ if "ID" not in df.columns:
     raise ValueError("The 'ID' column is missing from participants.tsv")
 
 # Iterate through each row
-for _, row in df.iterrows():
+for index, row in df.iterrows():
     participant_id = "sub-"+str(row["ID"])
-    participant_folder = os.path.join(os.getcwd(), participant_id)
+    participant_folder = os.path.join("../BIDS_derivatives", participant_id)
 
     # Check if any value in the row is NaN
     has_nan = row.isna().any()
 
     # Check if the folder exists
     if not os.path.exists(participant_folder) or has_nan:
+        # remove the row from the DataFrame
+        df.drop(index, inplace=True)
+
         destination = os.path.join(problematic_folder, participant_id)
 
         # Move the folder if it exists
@@ -34,5 +37,8 @@ for _, row in df.iterrows():
             print(f"Moved {participant_folder} to {destination}")
         else:
             print(f"Folder missing for ID {participant_id}")
+    
+# save the updated DataFrame to the same file
+df.to_csv(participants_file, sep="\t", index=False)
 
 print("Processing complete.")

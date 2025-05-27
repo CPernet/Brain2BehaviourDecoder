@@ -24,15 +24,15 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
 
     def generate_values(distribution, size):
         if distribution == 'gaussian':
-            return np.random.normal(size=size, scale=sigma).astype(dtype)
+            return np.random.normal(size=size, scale=sigma)
         elif distribution == 'gamma':
-            return gamma.rvs(a=2.0, size=size).astype(dtype)
+            return gamma.rvs(a=2.0, size=size)
         elif distribution == 'truncated_gaussian':
-            return np.sqrt(np.random.normal(size=size, scale=sigma)**2).astype(dtype)
+            return np.sqrt(np.random.normal(size=size, scale=sigma)**2)
         elif distribution == 'uniform':
-            return np.random.uniform(size=size).astype(dtype)
+            return np.random.uniform(size=size)
         elif distribution == 't':
-            return t.rvs(df=10, size=size).astype(dtype)
+            return t.rvs(df=10, size=size)
         else:
             raise ValueError("Unknown distribution type")
 
@@ -48,7 +48,7 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
         vector.flat[start_idx:end_idx] = values
 
     if offset is not None:
-        uniform_values = np.random.uniform(0, offset, size=(k+1)).astype(dtype)
+        uniform_values = np.random.uniform(0, offset, size=(k+1))
         vector += uniform_values.reshape((1, 1, 1, k+1))
         
     if use_space_correlation:
@@ -66,8 +66,23 @@ def create_random_vector(a, b, c, k, use_space_correlation=False, sigma=1, space
         elif post_process_type == 'zero':
             vector[mask] = 0
         elif post_process_type == 'inverse':
-            vector[mask] = 1 / vector
+            vector[mask] = 1 / (vector[mask] + 1e-10)  # Avoid division by zero
         else:
             raise ValueError("Unknown post-processing type")
 
-    return vector
+    if dtype is np.int16:
+        # Scale the vector to fit in int16 range
+        # Assuming the input is in the range [0, 1] after normalization
+        # and we want to scale it to fit in int16 range [-32768, 32767]
+        # This is a simple approach, you might want to adjust it based on your needs
+        # Normalize the vector to [0, 1]
+        # Shift to [-0.5, 0.5]
+        # Leave 80% of the max range for computation
+
+        vector = (vector - np.min(vector)) / (np.max(vector) - np.min(vector)) - 0.5
+        # Scale to int16 range
+        vector = vector * 32767 * 0.4
+        # Convert to int16
+        vector = vector.astype(np.int16)
+
+    return vector.astype(dtype)

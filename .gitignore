@@ -175,7 +175,12 @@ cython_debug/
 .pypirc
 
 # Data part
-BIDS_derivatives/
+BIDS_derivatives/*
 
 # results
 outputs/
+
+# all figures
+Figures/*
+
+tmp/
