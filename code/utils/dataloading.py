@@ -39,10 +39,13 @@ class NiftiLazyLoader:
         self.dtype = dtype
         self.k = k  # Initialize k
         self.split_indices = None
+        self.affine = None
         self.parameters = len(data_filename_paterns) + len(column_names_as_data)
 
         if use_mask is not None:
             mask = image.load_img("../BIDS_derivatives/sub-*/"+use_mask+self.extension)
+            self.affine = mask.affine
+
             mask = mask.get_fdata()
             print(f"Mask shape: {mask.shape}")
             #mask = image.load_img(use_mask)
@@ -99,7 +102,8 @@ class NiftiLazyLoader:
 
         for data_filename_pattern in self.data_filename_paterns:
             images = image.load_img(f"../BIDS_derivatives/sub-*/{data_filename_pattern}" + self.extension, dtype=self.dtype)
-            
+            if self.affine is None:
+                self.affine = images.affine
             if images is None:
                 raise ValueError(f"No images found for pattern: {data_filename_pattern}")
             

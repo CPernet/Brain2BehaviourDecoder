@@ -31,7 +31,7 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
     n_features = dataloader.parameters
     mask = dataloader.mask
     mask = np.where(mask)
-    affine = np.eye(4)
+    affine = dataloader.affine
 
     # check if metrics file exists
     if os.path.exists(f"../Figures/metrics_real_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy"):
@@ -74,7 +74,6 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
                 score_list = []
 
                 for i, (test_start_in, test_end_in) in enumerate(split_indices):
-                    #print(f"Running OLS filtering on data {i}")
 
                     # Perform cross-validation on axis 1
                     train_indices = np.ones(data_with_bas.shape[1], dtype=bool)
@@ -106,24 +105,9 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
                         # R² from squared correlation
                         score = corr ** 2
 
-                        # Calculate RMSE for each feature and voxel
-                        # rmse = np.sqrt(np.mean((true_y[:, train_indices] - y_train_pred) ** 2, axis=1))
-
-                        # Create a new mask
-                        # new_mask_tmp = (score >= filtering_threashold) & (rmse <= filtering_threashold / 2)
-
-                        # print(f"Mean R2 score: {np.mean(score)}, max R2 score: {np.max(score)}, min R2 score: {np.min(score)}")
-                        # print(f"Mean RMSE: {np.mean(rmse)}, max RMSE: {np.max(rmse)}, min RMSE: {np.min(rmse)}")
-
-
-                        # print(f"Mask has {np.sum(new_mask_tmp)} voxels out of {new_mask_tmp.size}- cross-validation {i}")
                     else:
                         raise ValueError("Unknown filtering metric")
-                    
-                    # Map new_mask_tmp into 3D
-                    #new_mask_3d = np.zeros((a, b, c))
-                    #print(f"Score shape: {score.shape}")
-                    #new_mask_3d[mask[0][indices[0]:indices[1]], mask[1][indices[0]:indices[1]], mask[2][indices[0]:indices[1]]] = score
+
                     score_list.append(score)
                 scores = np.stack(score_list, axis=0) # list of R2 scores
 
@@ -138,37 +122,12 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
                 # Create the mask: True where values are >= threshold, False otherwise
                 new_mask_m = median >= median_per
 
-
-                #new_mask_m = (median >= filtering_threshold) #& (std <= median / std_proportion)
-                #new_mask_3d = np.mean(mask_list, axis=0)
-                #new_mask_3d_or = np.sum(mask_list, axis=0) > 0
-                #print(f"Final mask (and) has {np.sum(new_mask_3d)} voxels out of {new_mask_3d.size}")
                 print(f"Final mask has {np.sum(new_mask_m)} voxels out of {new_mask_m.size}")
 
-                # # Use cKDTree for efficient neighbor counting
-                # coords = np.column_stack(np.where(new_mask_3d))
-                # tree = cKDTree(coords)
-
-                # neighbor_counts = np.zeros_like(new_mask_3d, dtype=int)
-
-                # # Query neighbors within the radius
-                # for i, coord in enumerate(coords):
-                #     neighbors = tree.query_ball_point(coord, r=radius)
-                #     neighbor_counts[tuple(coord)] = len(neighbors) - 1  # Exclude the voxel itself
-
-                # # Filter voxels with fewer neighbors than the threshold
-                # new_mask_3d[neighbor_counts < min_number_neighbours] = 0
-
-                # # Map the filtered 3D mask back into the temporary mask
-                # new_mask_tmp = new_mask_3d[mask[0][indices[0]:indices[1]], mask[1][indices[0]:indices[1]], mask[2][indices[0]:indices[1]]]
-
-                # Update a new mask based on the R2 score
-                #new_mask_tmp = np.expand_dims(new_mask_tmp, axis=-1)
                 new_mask[mask[0][indices[0]:indices[1]], mask[1][indices[0]:indices[1]], mask[2][indices[0]:indices[1]]] = new_mask_m
                 median_info[mask[0][indices[0]:indices[1]], mask[1][indices[0]:indices[1]], mask[2][indices[0]:indices[1]]] = median
             mask = new_mask.astype(np.bool_)
             # Save the new mask
-            affine = np.eye(4)
             new_mask_img = nib.Nifti1Image(new_mask, affine)
             median_info_img = nib.Nifti1Image(median_info, affine)
             nib.save(new_mask_img, f"../Figures/new_mask_real_world_filtering_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}_filtered_{filtering_threshold}.nii")
@@ -177,8 +136,6 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
 
             mask = np.where(mask)
             print("Filtering step completed")
-
-
 
     for data_type_name, d in dtype_list:
         for reg_model, name, this_model_parameters in zip(reg_models, output_names, model_parameters):
@@ -219,8 +176,6 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
                     # Include options for multiple alphas
                     if name == "ridge" or name == "lasso":
                         b_pred, y_pred = reg_model(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=d, **this_model_parameters)
-                        b_pred = b_pred[0]
-                        y_pred = y_pred[0]
                     else:
                         b_pred, y_pred = reg_model(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=d, **this_model_parameters)
                     b_pred = b_pred.squeeze()
@@ -251,15 +206,27 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
             # Save using nibabel
             nib.save(nifti_img_pred, output_file_path_predictions, dtype=np.float32)
 
-
             # Save using nibabel
             nib.save(nifti_img, output_file_path, dtype=d)
+
+            target_data = dataloader.participants_data[dataloader.column_name_target].values
+
+            # broadcast target_data to 4 dimensions with shape (1, 1, 1, n_samples)
+            target_data = target_data[np.newaxis, np.newaxis, np.newaxis, :]
+
+            # Calculate the mean voxel error accross 4 dim
+            mean_voxel_error = np.mean(output_data_depression_score - target_data, axis=3)
+            # Create a new Nifti image with the mean voxel error
+            mean_voxel_error_img = nib.Nifti1Image(mean_voxel_error, affine=affine)
+
+            # Save the mean voxel error image
+            output_file_path = f"../Figures/mean_voxel_error_{name}_{data_type_name}_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.nii"
+            nib.save(mean_voxel_error_img, output_file_path)
 
             # calculate the metrics for the y_pred and true_y
             mae = np.mean(np.abs(all_pred_y - all_true_y))
             mse = np.mean((all_pred_y - all_true_y) ** 2)
             std_diff = np.std(all_pred_y - all_true_y)
-
 
             # Save metrics
             metrics[name + "_" + data_type_name + "_mae"] = mae
@@ -268,6 +235,202 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
 
             # Save metrics
             np.save(f"../Figures/metrics_real_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy", metrics, allow_pickle=True)
+
+def null_hypothesis_test(dataloader, reg_models= [batched_ols, batched_ridge, batched_irls, batched_lasso],\
+                output_names = ["ols", "ridge", "irls", "lasso"], \
+                model_parameters = [{}, {}, {"max_iter": 1}, {"max_iter": 1}],\
+                dtype_list = [("float32", np.float32)],\
+                run_filtering_ols = True, k_cross_validation = 5, filtering_metric = "R2",
+                filtering_threshold = 0.25, min_number_neighbours = 3,\
+                radius = 2, rerun_filtering_ols = False, n_permutations = 1000,\
+                ):
+    a,b,c = dataloader.mask_shape
+    n_features = dataloader.parameters
+    mask = dataloader.mask
+    mask = np.where(mask)
+    affine = dataloader.affine
+
+    # check if metrics file exists
+    if os.path.exists(f"../Figures/null_testing_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy"):
+        print("Metrics file exists. Loading metrics...")
+
+        metrics = np.load(f"../Figures/null_testing_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy", allow_pickle=True).item()
+    else:
+        print("Metrics file does not exist. Creating new metrics file.")
+        metrics = {}
+
+    if run_filtering_ols:
+        print("Running OLS filtering")
+        # Check if the file already exists
+        output_file_path_mask = f"../Figures/new_mask_real_world_filtering_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}_filtered_{filtering_threshold}.nii"
+        if os.path.exists(output_file_path_mask) and not rerun_filtering_ols:
+            # load the mask
+            print(f"File {output_file_path_mask} already exists. Loading mask...")
+            mask = nib.load(output_file_path_mask).get_fdata()
+            mask = mask.astype(np.bool_)
+            dataloader.change_mask(mask)
+            mask = np.where(mask)
+
+
+            # skip the filtering step
+            print("Skipping filtering step")
+        else:
+
+            # Create a new mask
+            new_mask = np.zeros((a, b, c))
+            median_info = np.zeros((a, b, c))
+            for data, true_y, b_data, indices in dataloader:
+                # concatenate the data and b_data
+                data = np.concatenate((data, b_data), axis=-1)
+
+                # create k-fold cross-validation indices
+                split_points = np.linspace(0, data.shape[1], k_cross_validation + 1, dtype=int)
+                split_indices = [(split_points[i], split_points[i+1]) for i in range(k_cross_validation)]
+                data_with_bas = np.concatenate((np.ones((data.shape[0], data.shape[1], 1)), data), axis=2)
+
+                score_list = []
+
+                for i, (test_start_in, test_end_in) in enumerate(split_indices):
+
+                    # Perform cross-validation on axis 1
+                    train_indices = np.ones(data_with_bas.shape[1], dtype=bool)
+                    train_indices[test_start_in:test_end_in] = False
+                    test_indices = ~train_indices
+
+                    # Fit OLS
+                    b_pred, _ = batched_ols(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=dataloader.dtype)
+                    b_pred = b_pred.squeeze()
+
+                    # Calculate R2 score
+                    #y_test_pred = np.einsum('mni,mi->mn', data_with_bas[:, test_indices], b_pred)
+                    y_train_pred = np.einsum('mni,mi->mn', data_with_bas[:, train_indices], b_pred)
+
+                    if filtering_metric == "R2":
+                        # score = 1 - np.sum((true_y[:, test_indices] - y_test_pred) ** 2, axis=1) / np.sum((true_y[:, test_indices] - np.mean(true_y[:, test_indices], axis=1, keepdims=True)) ** 2, axis=1)
+
+                        # Center the true and predicted values
+                        y_true_centered = true_y[:, train_indices] - np.mean(true_y[:, train_indices], axis=1, keepdims=True)
+                        y_pred_centered = y_train_pred - np.mean(y_train_pred, axis=1, keepdims=True)
+
+                        # Compute numerator and denominator for Pearson correlation
+                        numerator = np.sum(y_true_centered * y_pred_centered, axis=1)
+                        denominator = np.sqrt(np.sum(y_true_centered ** 2, axis=1)) * np.sqrt(np.sum(y_pred_centered ** 2, axis=1))
+
+                        # Pearson correlation
+                        corr = numerator / denominator
+
+                        # R² from squared correlation
+                        score = corr ** 2
+
+                    else:
+                        raise ValueError("Unknown filtering metric")
+
+                    score_list.append(score)
+                scores = np.stack(score_list, axis=0) # list of R2 scores
+
+                median, std  = robust_std(scores)
+
+                print(f"Mean R2 score: {np.mean(median)}, max R2 score: {np.max(median)}, min R2 score: {np.min(median)}")
+                print(f"Mean std: {np.mean(std)}, max std: {np.max(std)}, min std: {np.min(std)}")
+
+                # Calculate the threshold value at the given percentile
+                median_per = np.percentile(median, filtering_threshold * 100)
+
+                # Create the mask: True where values are >= threshold, False otherwise
+                new_mask_m = median >= median_per
+
+                print(f"Final mask has {np.sum(new_mask_m)} voxels out of {new_mask_m.size}")
+
+                new_mask[mask[0][indices[0]:indices[1]], mask[1][indices[0]:indices[1]], mask[2][indices[0]:indices[1]]] = new_mask_m
+                median_info[mask[0][indices[0]:indices[1]], mask[1][indices[0]:indices[1]], mask[2][indices[0]:indices[1]]] = median
+            mask = new_mask.astype(np.bool_)
+            # Save the new mask
+            new_mask_img = nib.Nifti1Image(new_mask, affine)
+            median_info_img = nib.Nifti1Image(median_info, affine)
+            nib.save(new_mask_img, f"../Figures/new_mask_real_world_filtering_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}_filtered_{filtering_threshold}.nii")
+            nib.save(median_info_img, f"../Figures/medians_r2_real_world_filtering_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}_filtered_{filtering_threshold}.nii")
+            dataloader.change_mask(mask)
+
+            mask = np.where(mask)
+            print("Filtering step completed")
+
+    for data_type_name, d in dtype_list:
+        for reg_model, name, this_model_parameters in zip(reg_models, output_names, model_parameters):
+            print(f"Running {name} on null hypotesis with {data_type_name}")
+
+            # create n_permutations indeces of y
+            permuted_indices = np.array([np.random.permutation(dataloader.participants_data[dataloader.column_name_target].index) for _ in range(n_permutations)])
+            
+            i = 0
+            error_container = []
+            for data, true_y, broadcastable_data, indices in dataloader:
+                data = np.concatenate((data, broadcastable_data), axis=-1)
+
+                print(f"Running {name} on data {i}")
+                i += 1
+                data_with_bas = np.concatenate((np.ones((data.shape[0], data.shape[1], 1)), data), axis=2)
+
+                data_with_bas = cast_to_dtype(data_with_bas, d)
+
+                # create k-fold cross-validation indices
+                split_points = np.linspace(0, data.shape[1], k_cross_validation + 1, dtype=int)
+                split_indices = [(split_points[i], split_points[i+1]) for i in range(k_cross_validation)]
+                data_with_bas = np.concatenate((np.ones((data.shape[0], data.shape[1], 1)), data), axis=2)
+                
+                # create a new true_y for each permutation
+                true_y = dataloader.participants_data[dataloader.column_name_target].values
+                # apply the permuted indices to true_y
+                true_y = true_y.iloc[permuted_indices[:, indices[0]:indices[1]]].values
+
+
+                errors = np.zeros((data_with_bas.shape[0], data_with_bas.shape[1], n_permutations))
+
+                for k, (test_start_in, test_end_in) in enumerate(split_indices):
+                    # Perform cross-validation on axis 1
+                    train_indices = np.ones(data_with_bas.shape[1], dtype=bool)
+                    train_indices[test_start_in:test_end_in] = False
+                    test_indices = ~train_indices
+                    # Include options for multiple alphas
+                    if name == "ridge" or name == "lasso":
+                        b_pred, y_pred = reg_model(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=d, **this_model_parameters)
+                    else:
+                        b_pred, y_pred = reg_model(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=d, **this_model_parameters)
+                    
+                    full_y_pred = np.einsum('bij,bjk->bik', data_with_bas, b_pred)
+
+                    # error shape (N_voxels, n_participants, n_permutations)
+                    error = np.abs(full_y_pred - true_y)
+                    
+                    errors[:, indices[0]:indices[1], :] += error
+                    
+
+                    #b_pred = b_pred.squeeze()
+                    #k_b_preds.append(b_pred)
+                    #k_y_preds.append(y_pred)
+
+                errors /= (k_cross_validation-1)
+
+                errors = np.mean(errors, axis=1)
+                errors = np.min(errors, axis=0)
+
+                error_container.append(errors)
+            
+            # Concatenate all predicted and true values
+            error_container = np.stack(error_container, axis=0)
+            error_container = np.min(error_container, axis=0)
+
+            # take the 0.05 percentile of the error_container
+            error_threshold = np.percentile(error_container, 5)
+            print(f"Error threshold: {error_threshold} for {name} with {data_type_name}")
+
+            # save the error container in metrics
+            metrics[name + "_" + data_type_name + "_error_threshold"] = error_threshold
+            metrics[name + "_" + data_type_name + "_error_container"] = error_container
+
+            # Save metrics
+            np.save(f"../Figures/null_testing_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy", metrics, allow_pickle=True)
+
+                
 
 def run_forward_beta_tests(dataloader, reg_models= [batched_ols, batched_ridge, batched_irls, batched_lasso],\
                 output_names = ["ols", "ridge", "irls", "lasso"], \
@@ -286,7 +449,7 @@ def run_forward_beta_tests(dataloader, reg_models= [batched_ols, batched_ridge, 
     n_features = dataloader.parameters
     mask = dataloader.mask
     mask = np.where(mask)
-    affine = np.eye(4)
+    affine = dataloader.affine
     # create a dict to store metrics
 
     # check if metrics file exists
@@ -388,7 +551,6 @@ def run_forward_beta_tests(dataloader, reg_models= [batched_ols, batched_ridge, 
                     # Include options for multiple alphas
                     if name == "ridge" or name == "lasso":
                         b_pred, pred_y = reg_model(data_with_bas, true_y, dtype=d, **this_model_parameters)
-                        b_pred = b_pred[0]
                     else:
                         b_pred, pred_y = reg_model(data_with_bas, true_y, dtype=d, **this_model_parameters)
                     b_pred = b_pred.squeeze()
@@ -424,6 +586,8 @@ def run_forward_beta_tests(dataloader, reg_models= [batched_ols, batched_ridge, 
                 # Save metrics
                 np.save("../Figures/metrics_beta_tests.npy", metrics, allow_pickle=True)
 
+
+
 def run_forward_smoothing_beta_tests(dataloader, mask, output_names = ["ols", "ridge", "irls", "lasso"], \
                 smoothing_models = ["mahalanobis","gaussian","dot_product"],\
                 beta_creation_parameters = [("no_space_correlation", {"use_space_correlation": False}),\
@@ -436,7 +600,7 @@ def run_forward_smoothing_beta_tests(dataloader, mask, output_names = ["ols", "r
                                                                              "post_process_p": 0.01, "post_process_type": "inverse"})], \
                 dtype_list = [("float32", np.float32), ("float64", np.float64)],\
                 recalculate_metrics = False):
-    affine = np.eye(4)
+    affine = dataloader.affine
     # create a dict to store metrics
     if os.path.exists("../Figures/metrics_smoothed_beta_tests.npy"):
         print("Metrics file exists. Loading metrics...")
@@ -774,12 +938,15 @@ def smoothing_function(data, mask, model, dtype = np.float32):
 def main():
     dataloader = NiftiLazyLoader(["anat/*MNI152NLin2009cAsym_label*GM_probseg","dwi/*MNI152NLin2009cAsym_desc*OD_NODDI","dwi/*MNI152NLin2009cAsym_desc*ISOVF_NODDI","dwi/*MNI152NLin2009cAsym_desc*ICVF_NODDI"],use_mask="anat/*MNI152NLin2009cAsym_desc*brain_mask",
                              column_name_target="IDS-SR30-0_to_84",column_names_as_data=["Gender","Age_in_months"])
-    run_forward(dataloader)#, rerun_filtering_ols=True)
+    
+    null_hypothesis_test(dataloader=dataloader)
+    #run_forward(dataloader)#, rerun_filtering_ols=True)
     #run_forward_smoothing_beta_tests(dataloader.mask)
 
 if __name__ == "__main__":
-    dataloader = NiftiLazyLoader(["anat/*MNI152NLin2009cAsym_label*GM_probseg","dwi/*MNI152NLin2009cAsym_desc*OD_NODDI","dwi/*MNI152NLin2009cAsym_desc*ISOVF_NODDI","dwi/*MNI152NLin2009cAsym_desc*ICVF_NODDI"],use_mask="anat/*MNI152NLin2009cAsym_desc*brain_mask",
-                             column_name_target="IDS-SR10_0_to_30",column_names_as_data=["Gender","Age_in_months"])
-    #run_forward(dataloader)
-    run_forward_beta_tests(dataloader)
-    run_forward_smoothing_beta_tests(dataloader, dataloader.mask)
+    main()
+    # dataloader = NiftiLazyLoader(["anat/*MNI152NLin2009cAsym_label*GM_probseg","dwi/*MNI152NLin2009cAsym_desc*OD_NODDI","dwi/*MNI152NLin2009cAsym_desc*ISOVF_NODDI","dwi/*MNI152NLin2009cAsym_desc*ICVF_NODDI"],use_mask="anat/*MNI152NLin2009cAsym_desc*brain_mask",
+    #                          column_name_target="IDS-SR10_0_to_30",column_names_as_data=["Gender","Age_in_months"])
+    # #run_forward(dataloader)
+    # run_forward_beta_tests(dataloader)
+    # run_forward_smoothing_beta_tests(dataloader, dataloader.mask)

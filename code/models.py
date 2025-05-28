@@ -13,6 +13,9 @@ def batched_ols(X, Y, dtype=np.float64):
     
     Returns:
     - theta: (batch_size, n_features, n_targets)
+      The OLS regression coefficients for each batch.
+    - Y_pred: (batch_size, n_samples, n_targets)
+      The predicted target values for each batch using the computed coefficients.
     """
 
     #X = X.astype(dtype)
@@ -28,17 +31,16 @@ def batched_ols(X, Y, dtype=np.float64):
     # calculate the predicted values
     Y_pred = np.einsum('bij,bjk->bik', X, W)
 
-
     return W, Y_pred
 
-def batched_ridge(X, Y, alphas=[1.0], dtype=np.float64):
+def batched_ridge(X, Y, alpha=1.0, dtype=np.float64):
     """
     Fully vectorized Ridge Regression solution for batched inputs.
     
     Parameters:
     - X: (batch_size, n_samples, n_features)
     - Y: (batch_size, n_samples, n_targets)
-    - alphas: List of regularization strengths
+    - alphas: Regularization strengths
     - dtype: Data type for computations (default: np.float64)
     
     Returns:
@@ -54,22 +56,19 @@ def batched_ridge(X, Y, alphas=[1.0], dtype=np.float64):
 
     XtX = np.einsum('bji,bjk->bik', X, X)  # Compute X^T X
     XtY = np.einsum('bji,bjk->bik', X, Y)  # Compute X^T Y
-    ret = []
-    pred = []
-    for alpha in alphas:
-        lambda_I = np.zeros((n_features, n_features), dtype=dtype)  # Regularization matrix
-        lambda_I[1:, 1:] = alpha * np.eye(n_features - 1, dtype=dtype)  # Do not regularize the bias term
-        if Y.ndim == 3:
-            a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)  # Use pinv instead of solve
-            ret.append(a)
-        else:
-            a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)
-            a.squeeze()
-            ret.append(a)
-        # Calculate the predicted values
-        Y_pred = np.einsum('bij,bjk->bik', X, a)  # Use the computed coefficients to predict Y
-        pred.append(Y_pred)
-    return ret, pred
+    
+    lambda_I = np.zeros((n_features, n_features), dtype=dtype)  # Regularization matrix
+    lambda_I[1:, 1:] = alpha * np.eye(n_features - 1, dtype=dtype)  # Do not regularize the bias term
+    if Y.ndim == 3:
+        a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)  # Use pinv instead of solve
+       
+    else:
+        a = np.einsum('bij,bjk->bik', np.linalg.pinv(XtX + lambda_I), XtY)
+        a.squeeze()
+    # Calculate the predicted values
+    Y_pred = np.einsum('bij,bjk->bik', X, a)  # Use the computed coefficients to predict Y
+    
+    return a, Y_pred
 
 # TODO fix this
 def batched_irls(X, Y, max_iter=1, tol=1e-6, dtype=np.float64):
@@ -132,7 +131,7 @@ def batched_irls(X, Y, max_iter=1, tol=1e-6, dtype=np.float64):
 
     return theta_new, Y_pred
 
-def batched_lasso(X, Y, alphas=[1.0], max_iter=1, tol=1e-6, dtype=np.float64):
+def batched_lasso(X, Y, alpha=1.0, max_iter=1, tol=1e-6, dtype=np.float64):
     """
     Fully vectorized Lasso Regression solution for batched inputs using coordinate descent.
     
@@ -156,31 +155,27 @@ def batched_lasso(X, Y, alphas=[1.0], max_iter=1, tol=1e-6, dtype=np.float64):
     batch_size, n_samples, n_features = X.shape
     _, _, n_targets = Y.shape
 
-    results = []
-    pred = []
-    for alpha in alphas:
-        theta = np.zeros((batch_size, n_features, n_targets), dtype=dtype)  # Initialize coefficients
-        for _ in range(max_iter):
-            theta_old = theta.copy()
-            for j in range(n_features):
-                # Compute the residual excluding the effect of feature j
-                residual = Y - np.einsum('bij,bjk->bik', X, theta) + X[:, :, j, None] * theta[:, j, None, :]
-                
-                # Compute rho
-                rho = np.einsum('bi,bik->bk', X[:, :, j], residual)
-
-                # Soft-thresholding update
-                denominator = np.einsum('bi,bi->b', X[:, :, j], X[:, :, j])[:, None]
-                theta[:, j, :] = np.sign(rho) * np.maximum(np.abs(rho) - alpha, 0) / denominator
+    theta = np.zeros((batch_size, n_features, n_targets), dtype=dtype)  # Initialize coefficients
+    for _ in range(max_iter):
+        theta_old = theta.copy()
+        for j in range(n_features):
+            # Compute the residual excluding the effect of feature j
+            residual = Y - np.einsum('bij,bjk->bik', X, theta) + X[:, :, j, None] * theta[:, j, None, :]
             
-            # Check for convergence
-            if np.all(np.abs(theta - theta_old) < tol):
-                break
-        # Calculate the predicted values
-        Y_pred = np.einsum('bij,bjk->bik', X, theta)  # Use the computed coefficients to predict Y
-        pred.append(Y_pred)
-        results.append(theta)
-    return results, pred
+            # Compute rho
+            rho = np.einsum('bi,bik->bk', X[:, :, j], residual)
+
+            # Soft-thresholding update
+            denominator = np.einsum('bi,bi->b', X[:, :, j], X[:, :, j])[:, None]
+            theta[:, j, :] = np.sign(rho) * np.maximum(np.abs(rho) - alpha, 0) / denominator
+        
+        # Check for convergence
+        if np.all(np.abs(theta - theta_old) < tol):
+            break
+    # Calculate the predicted values
+    Y_pred = np.einsum('bij,bjk->bik', X, theta)  # Use the computed coefficients to predict Y
+
+    return theta, Y_pred
 
         
 def batched_linear_regression(X,Y,lambda_reg):

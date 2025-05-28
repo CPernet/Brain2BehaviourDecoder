@@ -3,8 +3,8 @@ import shutil
 import pandas as pd
 
 # Define paths
-participants_file = "../BIDS_derivatives/participants.tsv"
-problematic_folder = "../BIDS_derivatives/problematic"
+participants_file = "../../BIDS_derivatives/participants.tsv"
+problematic_folder = "../../BIDS_derivatives/problematic"
 
 # Create 'problematic' folder if it doesn't exist
 os.makedirs(problematic_folder, exist_ok=True)
@@ -19,7 +19,7 @@ if "ID" not in df.columns:
 # Iterate through each row
 for index, row in df.iterrows():
     participant_id = "sub-"+str(row["ID"])
-    participant_folder = os.path.join("../BIDS_derivatives", participant_id)
+    participant_folder = os.path.join("../../BIDS_derivatives", participant_id)
 
     # Check if any value in the row is NaN
     has_nan = row.isna().any()
