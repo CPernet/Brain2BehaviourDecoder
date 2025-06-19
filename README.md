@@ -7,10 +7,7 @@ In this work, we try to predict behaviour from a set of brain images.
 - [Overview](#overview)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Dataset](#dataset)
-- [Model Architecture](#model-architecture)
-- [Results](#results)
-- [Contributing](#contributing)
+- [Future work](#future-work)
 - [License](#license)
 
 ## Overview
