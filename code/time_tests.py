@@ -84,7 +84,7 @@ def test_performance_all_dtypes(models = [batched_ols,batched_irls,batched_ridge
     
     return results
 
-if __name__ == "__main__":
+def main():
     # Test the performance of the models for int16, float32 and float64 and save the results in a dictionary
     results = test_performance_all_dtypes()
     
@@ -102,4 +102,7 @@ if __name__ == "__main__":
     np.savez("../Figures/performance_results.npz", results=results)
     print("Results saved to performance_results.npz")
     # create confidence intervals for the results
+
+if __name__ == "__main__":
+    main()
 

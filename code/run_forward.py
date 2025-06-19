@@ -23,9 +23,12 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
                 model_parameters = [{}, {}, {"max_iter": 1}, {"max_iter": 1}],\
                 dtype_list = [("float32", np.float32), ("float64", np.float64)],\
                 run_filtering_ols = True, k_cross_validation = 5, filtering_metric = "R2",
-                filtering_threshold = 0.25, min_number_neighbours = 3,\
-                radius = 2, rerun_filtering_ols = False,\
+                filtering_threshold = 0.25, rerun_filtering_ols = False,\
                 ):
+    """ Runs regression on the data using the specified regression models and parameters coming from dataloader.
+    
+    """
+    
     std_proportion = 2
     a,b,c = dataloader.mask_shape
     n_features = dataloader.parameters
@@ -212,10 +215,12 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
             target_data = dataloader.participants_data[dataloader.column_name_target].values
 
             # broadcast target_data to 4 dimensions with shape (1, 1, 1, n_samples)
-            target_data = target_data[np.newaxis, np.newaxis, np.newaxis, :]
+            target_data = target_data[np.newaxis, :]
+
+            mean_voxel_error = np.zeros((a, b, c))
 
             # Calculate the mean voxel error accross 4 dim
-            mean_voxel_error = np.mean(output_data_depression_score - target_data, axis=3)
+            mean_voxel_error[mask] = np.mean(np.abs(output_data_depression_score[mask] - target_data), axis=1)
             # Create a new Nifti image with the mean voxel error
             mean_voxel_error_img = nib.Nifti1Image(mean_voxel_error, affine=affine)
 
@@ -236,14 +241,16 @@ def run_forward(dataloader, reg_models= [batched_ols, batched_ridge, batched_irl
             # Save metrics
             np.save(f"../Figures/metrics_real_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy", metrics, allow_pickle=True)
 
-def null_hypothesis_test(dataloader, reg_models= [batched_ols, batched_ridge, batched_irls, batched_lasso],\
-                output_names = ["ols", "ridge", "irls", "lasso"], \
-                model_parameters = [{}, {}, {"max_iter": 1}, {"max_iter": 1}],\
+def null_hypothesis_test(dataloader, reg_models= [batched_ridge, batched_lasso],\
+                output_names = ["ridge", "lasso"], \
+                model_parameters = [{}, {"max_iter": 1}],\
                 dtype_list = [("float32", np.float32)],\
                 run_filtering_ols = True, k_cross_validation = 5, filtering_metric = "R2",
                 filtering_threshold = 0.25, min_number_neighbours = 3,\
                 radius = 2, rerun_filtering_ols = False, n_permutations = 1000,\
+                n_max_permutation = 50,
                 ):
+    """Runs a null hypothesis test on the data using the specified regression models and parameters."""
     a,b,c = dataloader.mask_shape
     n_features = dataloader.parameters
     mask = dataloader.mask
@@ -251,7 +258,7 @@ def null_hypothesis_test(dataloader, reg_models= [batched_ols, batched_ridge, ba
     affine = dataloader.affine
 
     # check if metrics file exists
-    if os.path.exists(f"../Figures/null_testing_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy"):
+    if os.path.exists(f"../Figures/null_testing_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy"):
         print("Metrics file exists. Loading metrics...")
 
         metrics = np.load(f"../Figures/null_testing_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy", allow_pickle=True).item()
@@ -354,16 +361,30 @@ def null_hypothesis_test(dataloader, reg_models= [batched_ols, batched_ridge, ba
             mask = np.where(mask)
             print("Filtering step completed")
 
+    n_run_times = n_permutations // n_max_permutation
+    # create n_permutations indeces of y
+    target_len = len(
+        dataloader.participants_data[
+            dataloader.column_name_target
+        ]
+    )
+    rng = np.random.default_rng()
+
+    true_y_p = dataloader.participants_data[dataloader.column_name_target].values
+
+    true_y_to_sub = true_y_p[np.newaxis, :, np.newaxis]
+
+
     for data_type_name, d in dtype_list:
         for reg_model, name, this_model_parameters in zip(reg_models, output_names, model_parameters):
-            print(f"Running {name} on null hypotesis with {data_type_name}")
-
-            # create n_permutations indeces of y
-            permuted_indices = np.array([np.random.permutation(dataloader.participants_data[dataloader.column_name_target].index) for _ in range(n_permutations)])
-            
+            print(f"Running {name} on null hypotesis with {data_type_name}")         
             i = 0
-            error_container = []
+
+            errors_data_part = []
+        
             for data, true_y, broadcastable_data, indices in dataloader:
+                target_len = true_y.shape[-1]
+                #print("index of data:", indices)
                 data = np.concatenate((data, broadcastable_data), axis=-1)
 
                 print(f"Running {name} on data {i}")
@@ -371,61 +392,69 @@ def null_hypothesis_test(dataloader, reg_models= [batched_ols, batched_ridge, ba
                 data_with_bas = np.concatenate((np.ones((data.shape[0], data.shape[1], 1)), data), axis=2)
 
                 data_with_bas = cast_to_dtype(data_with_bas, d)
-
-                # create k-fold cross-validation indices
-                split_points = np.linspace(0, data.shape[1], k_cross_validation + 1, dtype=int)
-                split_indices = [(split_points[i], split_points[i+1]) for i in range(k_cross_validation)]
-                data_with_bas = np.concatenate((np.ones((data.shape[0], data.shape[1], 1)), data), axis=2)
+                #print(f"Shape of data_with_bas: {data_with_bas.shape}")
                 
-                # create a new true_y for each permutation
-                true_y = dataloader.participants_data[dataloader.column_name_target].values
-                # apply the permuted indices to true_y
-                true_y = true_y.iloc[permuted_indices[:, indices[0]:indices[1]]].values
+                # create a list to store errors
+                errors_g = []
 
+                for per_part in range(n_run_times):
+                    print(f"Running permutation {per_part + 1} of {n_run_times}")
+                    permuted_indices = np.array(
+                        [
+                            rng.permutation(
+                                np.arange(target_len)
+                            )
+                            for _ in range(
+                                n_max_permutation
+                            )
+                        ]
+                    )
+                    #permuted_indices = np.expand_dims(permuted_indices, axis=0)
 
-                errors = np.zeros((data_with_bas.shape[0], data_with_bas.shape[1], n_permutations))
+                    true_y = true_y_p[permuted_indices]
+                    #print(f"Shape of true_y: {true_y.shape}")
 
-                for k, (test_start_in, test_end_in) in enumerate(split_indices):
-                    # Perform cross-validation on axis 1
-                    train_indices = np.ones(data_with_bas.shape[1], dtype=bool)
-                    train_indices[test_start_in:test_end_in] = False
-                    test_indices = ~train_indices
-                    # Include options for multiple alphas
-                    if name == "ridge" or name == "lasso":
-                        b_pred, y_pred = reg_model(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=d, **this_model_parameters)
-                    else:
-                        b_pred, y_pred = reg_model(data_with_bas[:, train_indices], true_y[:, train_indices], dtype=d, **this_model_parameters)
+                    true_y = true_y.T
+                    #print(f"Shape of true_y: {true_y.shape}")
+
+                    #print(f"Shape of true_y: {true_y.shape}")
+
+                    true_y = np.broadcast_to(true_y, (data_with_bas.shape[0],true_y.shape[0],n_max_permutation))
+
+                    #print(f"Shape of true_y: {true_y.shape}")
+
+                    #errors = np.zeros((data_with_bas.shape[0], data_with_bas.shape[1], n_max_permutation))
                     
-                    full_y_pred = np.einsum('bij,bjk->bik', data_with_bas, b_pred)
+                    b_pred, y_pred = reg_model(data_with_bas, true_y, dtype=d, **this_model_parameters)
 
-                    # error shape (N_voxels, n_participants, n_permutations)
-                    error = np.abs(full_y_pred - true_y)
-                    
-                    errors[:, indices[0]:indices[1], :] += error
-                    
+                    errors = np.abs(y_pred - true_y_to_sub)
 
-                    #b_pred = b_pred.squeeze()
-                    #k_b_preds.append(b_pred)
-                    #k_y_preds.append(y_pred)
+                    del b_pred, y_pred
 
-                errors /= (k_cross_validation-1)
+                    # we take mean error across all participants
+                    errors = np.mean(errors, axis=1)
 
-                errors = np.mean(errors, axis=1)
-                errors = np.min(errors, axis=0)
+                    # we sum current voxels not to store to much data
+                    errors = np.min(errors, axis=0)
+                    #errors = np.min(errors, axis=0)
 
-                error_container.append(errors)
+                    errors_g.append(errors)
+
+                errors_data_part.append(np.concatenate(errors_g))
+
+            errors_data_part = np.stack(errors_data_part, axis=0)
+
+            errors_data_part = np.min(errors_data_part, axis=0)
             
-            # Concatenate all predicted and true values
-            error_container = np.stack(error_container, axis=0)
-            error_container = np.min(error_container, axis=0)
+            #error_array = error_array / dataloader.mask_num_el
 
             # take the 0.05 percentile of the error_container
-            error_threshold = np.percentile(error_container, 5)
+            error_threshold = np.percentile(errors_data_part, 5)
             print(f"Error threshold: {error_threshold} for {name} with {data_type_name}")
 
             # save the error container in metrics
             metrics[name + "_" + data_type_name + "_error_threshold"] = error_threshold
-            metrics[name + "_" + data_type_name + "_error_container"] = error_container
+            metrics[name + "_" + data_type_name + "_error_container"] = errors_data_part
 
             # Save metrics
             np.save(f"../Figures/null_testing_beta_run_filtering_ols_{run_filtering_ols}_{dataloader.column_name_target}.npy", metrics, allow_pickle=True)
@@ -445,6 +474,9 @@ def run_forward_beta_tests(dataloader, reg_models= [batched_ols, batched_ridge, 
                                                                              "post_process_p": 0.01, "post_process_type": "inverse"})], \
                 dtype_list = [("float32", np.float32), ("float64", np.float64)],\
                 regenerate_betas = False, recalculate_metrics = False):
+    """Generates random betas and runs regression models on them, saving the results and metrics.
+
+    """
     a,b,c = dataloader.mask_shape
     n_features = dataloader.parameters
     mask = dataloader.mask
@@ -515,21 +547,21 @@ def run_forward_beta_tests(dataloader, reg_models= [batched_ols, batched_ridge, 
                         # calculate the metrics for the y_pred and true_y
                         mae_y = np.mean(np.abs(all_pred_y - all_true_y))
                         mse_y = np.mean((all_pred_y - all_true_y) ** 2)
-                        std_diff_y = np.std(all_pred_y - all_true_y)
+                        std_div_y = np.std(all_pred_y - all_true_y)
 
 
                         mae = np.mean(np.abs(output_data[mask] - target_betas))
                         mse = np.mean((output_data[mask] - target_betas) ** 2)
-                        std_diff = np.std(output_data[mask] - target_betas)
+                        std_div = np.std(output_data[mask] - target_betas)
 
                         # Save metrics
                         metrics[name + "_" + beta_name + "_" + data_type_name + "_mae"] = mae
                         metrics[name + "_" + beta_name + "_" + data_type_name + "_mse"] = mse
-                        metrics[name + "_" + beta_name + "_" + data_type_name + "_std_diff"] = std_diff
+                        metrics[name + "_" + beta_name + "_" + data_type_name + "_std_div"] = std_div
 
                         metrics[name + "_" + beta_name + "_" + data_type_name + "_mae_y"] = mae_y
                         metrics[name + "_" + beta_name + "_" + data_type_name + "_mse_y"] = mse_y
-                        metrics[name + "_" + beta_name + "_" + data_type_name + "_std_diff_y"] = std_diff_y
+                        metrics[name + "_" + beta_name + "_" + data_type_name + "_std_div_y"] = std_div_y
 
                         # Save metrics
                         np.save("../Figures/metrics_beta_tests.npy", metrics, allow_pickle=True)
@@ -600,6 +632,11 @@ def run_forward_smoothing_beta_tests(dataloader, mask, output_names = ["ols", "r
                                                                              "post_process_p": 0.01, "post_process_type": "inverse"})], \
                 dtype_list = [("float32", np.float32), ("float64", np.float64)],\
                 recalculate_metrics = False):
+    """
+    Transforms previously generated betas using smoothing function and saves them
+
+
+    """
     affine = dataloader.affine
     # create a dict to store metrics
     if os.path.exists("../Figures/metrics_smoothed_beta_tests.npy"):
@@ -728,19 +765,20 @@ def run_forward_smoothing_beta_tests(dataloader, mask, output_names = ["ols", "r
                     np.save("../Figures/metrics_smoothed_beta_tests.npy", metrics, allow_pickle=True)
 
 def smoothing_function(data, mask, model, dtype = np.float32):
+    """
+    Vectorized function of distance-based smoothing using a Gaussian kernel.
+
+    Parameters:
+    - data: (a, b, c, n_features) numpy array
+    - mask: (a, b, c) boolean numpy array (True for valid points)
+    - kernel_sigma: Standard deviation for the Gaussian kernel
+    - dtype: Data type for the output array (default: np.float32)
+
+    Returns:
+    - Smoothed output data with the same shape as input.
+    """
     if model == "mahalanobis":
-        """
-        Vectorized Mahalanobis distance-based smoothing using a Gaussian kernel.
 
-        Parameters:
-        - data: (a, b, c, n_features) numpy array
-        - mask: (a, b, c) boolean numpy array (True for valid points)
-        - kernel_sigma: Standard deviation for the Gaussian kernel
-        - radius: Maximum distance to consider for local smoothing
-
-        Returns:
-        - Smoothed output data with the same shape as input.
-        """
         radius=3.0
         space_scale = radius / 2  # You can adjust this for sharpness
         a, b, c, n_features = data.shape
@@ -937,16 +975,11 @@ def smoothing_function(data, mask, model, dtype = np.float32):
 
 def main():
     dataloader = NiftiLazyLoader(["anat/*MNI152NLin2009cAsym_label*GM_probseg","dwi/*MNI152NLin2009cAsym_desc*OD_NODDI","dwi/*MNI152NLin2009cAsym_desc*ISOVF_NODDI","dwi/*MNI152NLin2009cAsym_desc*ICVF_NODDI"],use_mask="anat/*MNI152NLin2009cAsym_desc*brain_mask",
-                             column_name_target="IDS-SR30-0_to_84",column_names_as_data=["Gender","Age_in_months"])
+                             column_name_target="IDS-SR30-0_to_84",column_names_as_data=["Gender","Age_in_months"], k=16)
     
     null_hypothesis_test(dataloader=dataloader)
-    #run_forward(dataloader)#, rerun_filtering_ols=True)
+    #run_forward(dataloader)
     #run_forward_smoothing_beta_tests(dataloader.mask)
 
 if __name__ == "__main__":
     main()
-    # dataloader = NiftiLazyLoader(["anat/*MNI152NLin2009cAsym_label*GM_probseg","dwi/*MNI152NLin2009cAsym_desc*OD_NODDI","dwi/*MNI152NLin2009cAsym_desc*ISOVF_NODDI","dwi/*MNI152NLin2009cAsym_desc*ICVF_NODDI"],use_mask="anat/*MNI152NLin2009cAsym_desc*brain_mask",
-    #                          column_name_target="IDS-SR10_0_to_30",column_names_as_data=["Gender","Age_in_months"])
-    # #run_forward(dataloader)
-    # run_forward_beta_tests(dataloader)
-    # run_forward_smoothing_beta_tests(dataloader, dataloader.mask)
