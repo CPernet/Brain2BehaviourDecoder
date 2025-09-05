@@ -1,0 +1,85 @@
+# Configuration file for running experiments with NIfTI lazy loading
+# Edit the values below as needed for your experiments
+
+
+nifti_lazy_loader:
+  data_patterns:
+    - "anat/*MNI152NLin2009cAsym_label*GM_probseg"
+    - "dwi/*MNI152NLin2009cAsym_desc*OD_NODDI"
+    - "dwi/*MNI152NLin2009cAsym_desc*ISOVF_NODDI"
+    - "dwi/*MNI152NLin2009cAsym_desc*ICVF_NODDI"
+  use_mask: "anat/*MNI152NLin2009cAsym_desc*brain_mask"
+  column_name_target: "IDS-SR30-0_to_84"
+  column_names_as_data:
+    - "Gender"
+    - "Age_in_months"
+  k: 16
+
+null_hypothesis_test:
+  reg_models: ["batched_ridge", "batched_lasso"]
+  output_names: ["ridge", "lasso"]
+  model_parameters:
+    - {}
+    - {max_iter: 1}
+  dtype_list:
+    - ["float32", "np.float32"]
+  run_filtering_ols: true
+  k_cross_validation: 5
+  filtering_metric: "R2"
+  filtering_threshold: 0.25
+  min_number_neighbours: 3
+  radius: 2
+  rerun_filtering_ols: false
+  n_permutations: 1000
+  n_max_permutation: 50
+
+run_forward:
+  reg_models: ["batched_ols", "batched_ridge", "batched_irls", "batched_lasso"]
+  output_names: ["ols", "ridge", "irls", "lasso"]
+  model_parameters:
+    - {}
+    - {}
+    - {max_iter: 1}
+    - {max_iter: 1}
+  dtype_list:
+    - ["float32", "np.float32"]
+    - ["float64", "np.float64"]
+  run_filtering_ols: true
+  k_cross_validation: 5
+  filtering_metric: "R2"
+  filtering_threshold: 0.25
+  rerun_filtering_ols: false
+
+run_forward_smoothing_beta_tests:
+  output_names: ["ols", "ridge", "irls", "lasso"]
+  smoothing_models: ["mahalanobis", "gaussian", "dot_product"]
+  beta_creation_parameters:
+    - ["no_space_correlation", {use_space_correlation: false}]
+    - ["space_correlation", {use_space_correlation: true}]
+    - ["space_correlation_s&p_negate", {use_space_correlation: true, post_process_s_and_p: true, post_process_p: 0.01, post_process_type: "negate"}]
+    - ["space_correlation_s&p_zero", {use_space_correlation: true, post_process_s_and_p: true, post_process_p: 0.01, post_process_type: "zero"}]
+    - ["space_correlation_s&p_inverse", {use_space_correlation: true, post_process_s_and_p: true, post_process_p: 0.01, post_process_type: "inverse"}]
+  dtype_list:
+    - ["float32", "np.float32"]
+    - ["float64", "np.float64"]
+  recalculate_metrics: false
+
+run_forward_beta_tests:
+  reg_models: ["batched_ols", "batched_ridge", "batched_irls", "batched_lasso"]
+  output_names: ["ols", "ridge", "irls", "lasso"]
+  model_parameters:
+    - {}
+    - {}
+    - {max_iter: 1}
+    - {max_iter: 1}
+  beta_creation_parameters:
+    - ["no_space_correlation", {use_space_correlation: false}]
+    - ["space_correlation", {use_space_correlation: true}]
+    - ["space_correlation_s&p_negate", {use_space_correlation: true, post_process_s_and_p: true, post_process_p: 0.01, post_process_type: "negate"}]
+    - ["space_correlation_s&p_zero", {use_space_correlation: true, post_process_s_and_p: true, post_process_p: 0.01, post_process_type: "zero"}]
+    - ["space_correlation_s&p_inverse", {use_space_correlation: true, post_process_s_and_p: true, post_process_p: 0.01, post_process_type: "inverse"}]
+  dtype_list:
+    - ["float32", "np.float32"]
+    - ["float64", "np.float64"]
+  regenerate_betas: false
+  recalculate_metrics: false
