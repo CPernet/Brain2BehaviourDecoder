@@ -7,10 +7,9 @@ In this work, we try to predict behaviour from a set of brain images.
 - [Overview](#overview)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Future work](#future-work)
-- [License](#license)
 - [Code Directory Structure](#code-directory-structure)
 - [Configuration](#configuration)
+- [License](#license)
 
 ## Overview
 
@@ -54,14 +53,6 @@ Run beta tests with a custom config file:
 python -m scripts.run_experiment --function run_forward_beta_tests --config my_config.yaml
 ```
 
-## Future work
-
-This repository will be modified to simplify running of the experiments. Further documentation shall be provided
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
 ## Code Directory Structure
 
 The `code/` directory contains the main scripts and modules for this project:
@@ -103,3 +94,8 @@ config:
 
 You can customize any experiment by editing the relevant section in `config.yaml`.
 To use a different config file, pass its path with the `--config` argument.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
